@@ -9,6 +9,8 @@
 (define-constant ERR-POLICY-NOT-TRANSFERABLE (err u110))
 (define-constant ERR-INVALID-RECIPIENT (err u111))
 (define-constant ERR-POLICY-EXPIRED (err u112))
+(define-constant ERR-RENEWAL-NOT-ENABLED (err u113))
+(define-constant ERR-INSUFFICIENT-BALANCE-FOR-RENEWAL (err u114))
 
 (define-data-var contract-owner principal tx-sender)
 (define-data-var oracle-address principal tx-sender)
@@ -50,6 +52,15 @@
     recipient: principal,
     transfer-price: uint,
     confirmed: bool
+  }
+)
+
+(define-map auto-renewals
+  { farmer: principal }
+  {
+    enabled: bool,
+    max-premium: uint,
+    renewal-count: uint
   }
 )
 
@@ -268,4 +279,66 @@
 
 (define-read-only (get-policy-transfer (farmer principal))
   (map-get? policy-transfers { farmer: farmer })
+)
+
+(define-public (enable-auto-renewal (max-premium uint))
+  (begin
+    (asserts! (> max-premium u0) ERR-INVALID-AMOUNT)
+    (ok (map-set auto-renewals
+      { farmer: tx-sender }
+      {
+        enabled: true,
+        max-premium: max-premium,
+        renewal-count: u0
+      }
+    ))
+  )
+)
+
+(define-public (disable-auto-renewal)
+  (begin
+    (asserts! (is-some (map-get? auto-renewals { farmer: tx-sender })) ERR-RENEWAL-NOT-ENABLED)
+    (map-delete auto-renewals { farmer: tx-sender })
+    (ok true)
+  )
+)
+
+(define-public (execute-auto-renewal (farmer principal))
+  (let
+    (
+      (policy (unwrap! (get-policy farmer) ERR-NO-POLICY))
+      (renewal-settings (unwrap! (map-get? auto-renewals { farmer: farmer }) ERR-RENEWAL-NOT-ENABLED))
+      (current-block stacks-block-height)
+      (new-premium (get premium policy))
+      (new-coverage (* new-premium (var-get payout-multiplier)))
+      (policy-duration u144)
+    )
+    (asserts! (get enabled renewal-settings) ERR-RENEWAL-NOT-ENABLED)
+    (asserts! (not (get active policy)) ERR-POLICY-EXISTS)
+    (asserts! (>= current-block (get end-block policy)) ERR-POLICY-EXPIRED)
+    (asserts! (<= new-premium (get max-premium renewal-settings)) ERR-INSUFFICIENT-BALANCE-FOR-RENEWAL)
+    (asserts! (>= (var-get total-pool-balance) new-coverage) ERR-INSUFFICIENT-POOL-BALANCE)
+    (try! (as-contract (stx-transfer? new-premium farmer (as-contract tx-sender))))
+    (var-set total-pool-balance (+ (var-get total-pool-balance) new-premium))
+    (map-set policies
+      { farmer: farmer }
+      {
+        premium: new-premium,
+        coverage: new-coverage,
+        rainfall-threshold: (get rainfall-threshold policy),
+        active: true,
+        start-block: current-block,
+        end-block: (+ current-block policy-duration)
+      }
+    )
+    (map-set auto-renewals
+      { farmer: farmer }
+      (merge renewal-settings { renewal-count: (+ (get renewal-count renewal-settings) u1) })
+    )
+    (ok true)
+  )
+)
+
+(define-read-only (get-auto-renewal-settings (farmer principal))
+  (map-get? auto-renewals { farmer: farmer })
 )
