@@ -7,6 +7,8 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
+    "test:basic": "vitest run tests/basic-validation.test.ts",
+    "test:syntax": "node test-syntax.cjs",
     "test:report": "vitest run -- --coverage --costs",
     "test:watch": "chokidar \"tests/**/*.ts\" \"contracts/**/*.clar\" -c \"npm run test:report\""
   },
