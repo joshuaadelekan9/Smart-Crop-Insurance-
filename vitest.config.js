@@ -21,21 +21,23 @@ import { vitestSetupFilePath, getClarinetVitestsArgv } from "@hirosystems/clarin
 
 export default defineConfig({
   test: {
-    environment: "clarinet", // use vitest-environment-clarinet
+    environment: "node", // use node environment instead of clarinet
     pool: "forks",
     poolOptions: {
       threads: { singleThread: true },
       forks: { singleFork: true },
     },
     setupFiles: [
-      vitestSetupFilePath,
+      // Remove clarinet setup files to avoid mnemonic validation
+      // vitestSetupFilePath,
       // custom setup files can be added here
     ],
     environmentOptions: {
-      clarinet: {
-        ...getClarinetVitestsArgv(),
-        // add or override options
-      },
+      // Remove clarinet options
+      // clarinet: {
+      //   ...getClarinetVitestsArgv(),
+      //   // add or override options
+      // },
     },
   },
 });

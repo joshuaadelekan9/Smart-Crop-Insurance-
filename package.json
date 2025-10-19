@@ -8,7 +8,9 @@
   "scripts": {
     "test": "vitest run",
     "test:basic": "vitest run tests/basic-validation.test.ts",
+    "test:logic": "vitest run tests/contract-logic.test.ts",
     "test:syntax": "node test-syntax.cjs",
+    "test:all": "npm run test:syntax && npm test",
     "test:report": "vitest run -- --coverage --costs",
     "test:watch": "chokidar \"tests/**/*.ts\" \"contracts/**/*.clar\" -c \"npm run test:report\""
   },
