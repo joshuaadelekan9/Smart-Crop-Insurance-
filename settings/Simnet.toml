@@ -1,18 +1,7 @@
 [network]
 name = "simnet"
+rpc_url = "http://localhost:20443"
 
 [accounts.deployer]
-mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout early"
-balance = 100_000_000_000_000
-
-[accounts.wallet_1]
-mnemonic = "sell invite acquire kitten bamboo drastic junk rating board sword matrix person"
-balance = 100_000_000_000_000
-
-[accounts.wallet_2]
-mnemonic = "hold problem because urban unpredictable silent criminal reduce crowd obtain prepare derive"
-balance = 100_000_000_000_000
-
-[accounts.wallet_3]
-mnemonic = "tree own fog hammer advance maximum million economy theory picture rough final"
-balance = 100_000_000_000_000
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+balance = 1000000000000

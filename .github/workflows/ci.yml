@@ -1,21 +1,17 @@
 name: CI
-on: [push, pull_request]
+
+on: [push]
+
 jobs:
   tests:
-    name: "Smart Crop Insurance Tests"
+    name: "Charity Donation Tracker – Syntax & Deployment Plan Check"
     runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout code"
-        uses: actions/checkout@v3
-      - name: "Check contract syntax"
-        uses: docker://hirosystems/clarinet:latest
-        with:
-          args: check
-      - name: "Setup Node.js"
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - name: "Install dependencies"
-        run: npm install
-      - name: "Run tests"
-        run: npm test
+
+    steps:  
+      - name: "Checkout repository"  
+        uses: actions/checkout@v4  
+
+      - name: "Validate Clarinet contracts and deployment plan"  
+        uses: docker://hirosystems/clarinet:latest  
+        with:  
+          args: check -d
