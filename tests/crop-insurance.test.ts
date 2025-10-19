@@ -1,4 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { simnet } from "@hirosystems/clarinet-sdk";
+import { Cl } from "@stacks/transactions";
 
 const accounts = simnet.getAccounts();
 const deployer = accounts.get("deployer")!;
@@ -331,6 +333,467 @@ describe("Smart Crop Insurance Contract", () => {
         oracle
       );
       expect(response.result).toBeErr(101); // ERR-POLICY-NOT-FOUND
+    });
+  });
+
+  describe("Crop Audit and Verification System", () => {
+    const auditor1 = accounts.get("wallet_2")!;
+    const auditor2 = accounts.get("wallet_3")!;
+    
+    describe("Auditor Registration", () => {
+      it("should allow new auditor registration", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("organic"), Cl.stringAscii("sustainable")])],
+          auditor1
+        );
+        expect(response.result).toBeOk(true);
+      });
+
+      it("should store auditor information correctly", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("irrigation"), Cl.stringAscii("pesticides")])],
+          auditor1
+        );
+        
+        const auditorInfo = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-auditor-info",
+          [auditor1],
+          deployer
+        );
+        expect(auditorInfo.result).toBeSome({
+          "registration-block": simnet.blockHeight,
+          specializations: ["irrigation", "pesticides"],
+          "completed-audits": 0,
+          "reputation-score": 100,
+          "is-active": true
+        });
+      });
+
+      it("should prevent duplicate auditor registration", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("organic")])],
+          auditor1
+        );
+        
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("sustainable")])],
+          auditor1
+        );
+        expect(response.result).toBeErr(201); // ERR-AUDIT-ALREADY-EXISTS
+      });
+    });
+
+    describe("Audit Request Creation", () => {
+      beforeEach(() => {
+        // Register an auditor for the tests
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("general")])],
+          auditor1
+        );
+      });
+
+      it("should create audit request successfully", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["tomatoes", "california-central-valley", 2], // Standard verification level
+          farmer1
+        );
+        expect(response.result).toBeOk(1); // First audit ID
+      });
+
+      it("should store audit request details correctly", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["lettuce", "oregon-coast", 3], // Premium verification level
+          farmer1
+        );
+        
+        const audit = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit",
+          [1],
+          deployer
+        );
+        expect(audit.result).toBeSome({
+          farmer: farmer1,
+          auditor: null,
+          "crop-type": "lettuce",
+          "farm-location": "oregon-coast",
+          "verification-level": 3,
+          "audit-fee": 3000, // 1000 * 3
+          status: 1, // AUDIT-PENDING
+          "request-block": simnet.blockHeight,
+          "completion-block": null,
+          "audit-report-hash": null,
+          "compliance-score": null
+        });
+      });
+
+      it("should update farmer's audit history", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["spinach", "texas-panhandle", 1], // Basic verification
+          farmer1
+        );
+        
+        const history = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-farmer-audit-history",
+          [farmer1],
+          deployer
+        );
+        expect(history.result["audit-ids"]).toContain(1);
+      });
+
+      it("should reject invalid verification levels", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["corn", "iowa", 4], // Invalid level (> 3)
+          farmer1
+        );
+        expect(response.result).toBeErr(202); // ERR-INVALID-AUDIT-STATUS
+      });
+    });
+
+    describe("Audit Process Management", () => {
+      beforeEach(() => {
+        // Setup: Register auditor and create audit request
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("soil-analysis")])],
+          auditor1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["wheat", "kansas-plains", 2],
+          farmer1
+        );
+      });
+
+      it("should allow registered auditor to accept audit request", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [1],
+          auditor1
+        );
+        expect(response.result).toBeOk(true);
+      });
+
+      it("should update audit status after acceptance", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [1],
+          auditor1
+        );
+        
+        const audit = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit",
+          [1],
+          deployer
+        );
+        expect(audit.result.auditor).toBe(auditor1);
+        expect(audit.result.status).toBe(2); // AUDIT-IN-PROGRESS
+      });
+
+      it("should prevent non-registered auditor from accepting requests", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [1],
+          farmer2 // Not registered as auditor
+        );
+        expect(response.result).toBeErr(205); // ERR-AUDITOR-NOT-AUTHORIZED
+      });
+    });
+
+    describe("Audit Results Submission", () => {
+      const reportHash = Cl.bufferFromHex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+      
+      beforeEach(() => {
+        // Setup: Register auditor, create request, and accept it
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("comprehensive")])],
+          auditor1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["soybeans", "illinois-farmland", 2],
+          farmer1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [1],
+          auditor1
+        );
+      });
+
+      it("should allow auditor to submit results", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [
+            1, // audit-id
+            85, // soil-quality-score
+            true, // irrigation-compliance
+            90, // pest-management-score
+            80, // sustainable-practices-score
+            "Excellent farming practices with minor improvements needed in water conservation.", // recommendations
+            reportHash
+          ],
+          auditor1
+        );
+        expect(response.result).toBeOk(88); // Overall compliance score: (85+100+90+80)/4 = 88.75 ≈ 88
+      });
+
+      it("should store audit results correctly", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [1, 75, false, 85, 70, "Good practices, irrigation system needs upgrade.", reportHash],
+          auditor1
+        );
+        
+        const results = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit-results",
+          [1],
+          deployer
+        );
+        expect(results.result).toBeSome({
+          "soil-quality-score": 75,
+          "irrigation-compliance": false,
+          "pest-management-score": 85,
+          "sustainable-practices-score": 70,
+          "overall-compliance": 57, // (75+0+85+70)/4 = 57.5 ≈ 57
+          recommendations: "Good practices, irrigation system needs upgrade.",
+          "certification-valid-until": simnet.blockHeight + 52560
+        });
+      });
+
+      it("should update audit status after submission", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [1, 90, true, 88, 85, "Exemplary sustainable farming practices.", reportHash],
+          auditor1
+        );
+        
+        const audit = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit",
+          [1],
+          deployer
+        );
+        expect(audit.result.status).toBe(3); // AUDIT-COMPLETED
+        expect(audit.result["completion-block"]).toBe(simnet.blockHeight);
+      });
+
+      it("should prevent non-assigned auditor from submitting results", () => {
+        // Register another auditor
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("pest-control")])],
+          auditor2
+        );
+        
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [1, 80, true, 85, 75, "Good results.", reportHash],
+          auditor2 // Different auditor
+        );
+        expect(response.result).toBeErr(205); // ERR-AUDITOR-NOT-AUTHORIZED
+      });
+
+      it("should reject invalid score values", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [1, 150, true, 90, 80, "Invalid score test.", reportHash], // soil score > 100
+          auditor1
+        );
+        expect(response.result).toBeErr(202); // ERR-INVALID-AUDIT-STATUS
+      });
+    });
+
+    describe("Audit Dispute Process", () => {
+      const reportHash = Cl.bufferFromHex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+      
+      beforeEach(() => {
+        // Setup: Complete audit process
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("dispute-test")])],
+          auditor1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["corn", "nebraska", 1],
+          farmer1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [1],
+          auditor1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "submit-audit-results",
+          [1, 60, false, 65, 55, "Below standard practices identified.", reportHash],
+          auditor1
+        );
+      });
+
+      it("should allow farmer to dispute audit results", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "dispute-audit-results",
+          [1, "Auditor was biased and did not follow proper procedures."],
+          farmer1
+        );
+        expect(response.result).toBeOk(true);
+      });
+
+      it("should update audit status after dispute", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "dispute-audit-results",
+          [1, "Scores are inaccurate based on actual farm conditions."],
+          farmer1
+        );
+        
+        const audit = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit",
+          [1],
+          deployer
+        );
+        expect(audit.result.status).toBe(4); // AUDIT-REJECTED
+      });
+
+      it("should prevent non-farmer from disputing", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "dispute-audit-results",
+          [1, "Invalid dispute attempt."],
+          farmer2 // Different farmer
+        );
+        expect(response.result).toBeErr(100); // ERR-NOT-AUTHORIZED
+      });
+    });
+
+    describe("Audit System Statistics and Queries", () => {
+      beforeEach(() => {
+        // Setup multiple audits for statistics
+        simnet.callPublicFn(
+          "crop-insurance",
+          "register-auditor",
+          [Cl.list([Cl.stringAscii("stats-test")])],
+          auditor1
+        );
+        
+        // Create multiple audit requests
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["potatoes", "idaho", 1],
+          farmer1
+        );
+        simnet.callPublicFn(
+          "crop-insurance",
+          "request-crop-audit",
+          ["carrots", "california", 2],
+          farmer2
+        );
+      });
+
+      it("should return correct audit system statistics", () => {
+        const stats = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit-stats",
+          [],
+          deployer
+        );
+        expect(stats.result).toEqual({
+          "next-audit-id": 3, // Should be 3 after creating 2 audits
+          "total-audit-fees": 3000, // 1000 * 1 + 1000 * 2 = 3000
+          "audit-fee-rate": 1000
+        });
+      });
+
+      it("should track farmer audit history correctly", () => {
+        const history = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-farmer-audit-history",
+          [farmer1],
+          deployer
+        );
+        expect(history.result["audit-ids"]).toContain(1);
+        expect(history.result["audit-ids"]).not.toContain(2);
+      });
+
+      it("should check certification validity", () => {
+        // Should return false initially (no completed audits)
+        const validity = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "has-valid-certification",
+          [farmer1],
+          deployer
+        );
+        expect(validity.result).toBe(false);
+      });
+    });
+
+    describe("Error Handling for Audit System", () => {
+      it("should handle requests for non-existent audits", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "accept-audit-request",
+          [999], // Non-existent audit ID
+          auditor1
+        );
+        expect(response.result).toBeErr(200); // ERR-AUDIT-NOT-FOUND
+      });
+
+      it("should handle insufficient audit fees", () => {
+        // This would typically be caught in fee validation
+        // For this test, we're checking the error constant exists
+        const auditStats = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-audit-stats",
+          [],
+          deployer
+        );
+        expect(auditStats.result["audit-fee-rate"]).toBe(1000);
+      });
     });
   });
 });

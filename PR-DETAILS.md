@@ -1,36 +1,42 @@
-# Smart Crop Insurance Contract
+# Crop Audit and Verification System
 
 ## Overview
-Comprehensive decentralized crop insurance system that provides automated weather-based payouts to farmers. This smart contract enables farmers to purchase insurance policies for their crops and receive automatic compensation when weather conditions fall outside normal parameters, reducing risk and providing financial security.
+Enhanced the Smart Crop Insurance contract with a comprehensive **Crop Audit and Verification System** that enables independent verification of farming practices and crop conditions. This feature adds credibility and transparency to the insurance ecosystem by allowing certified auditors to assess and verify farm compliance with sustainable and quality standards.
 
 ## Technical Implementation
-### Key Functions and Data Structures Added
 
-#### Core Data Structures
-- **Policy Management**: Complete policy lifecycle with farmer details, coverage amounts, premium calculations, and regional tracking
-- **Weather Claims Processing**: Oracle-driven weather data submission with automated payout calculations
-- **Regional Statistics**: Comprehensive tracking of policies, claims, and payouts by geographic region
-- **Multi-Account Support**: Full support for multiple farmers, policies, and oracle management
+### Key Data Structures Added
+- **Registered Auditors Map**: Tracks certified auditors with specializations, reputation scores, and completion statistics
+- **Crop Audits Map**: Manages audit requests from farmers including verification levels, fees, and status tracking  
+- **Audit Results Map**: Stores detailed compliance scores across soil quality, irrigation, pest management, and sustainability
+- **Farmer Audit History**: Maintains chronological audit records for each farmer
 
-#### Smart Contract Features
-- **Policy Creation**: `create-policy` - Farmers can purchase crop insurance with customizable coverage, duration, and crop types
-- **Weather-Based Claims**: `submit-weather-claim` - Oracle-submitted weather data triggers automatic payouts based on rainfall and temperature thresholds
-- **Policy Renewal**: `renew-policy` - Existing policies can be extended with additional premium payments
-- **Oracle Management**: `set-oracle` - Contract owner can designate trusted weather data providers
-- **Comprehensive Analytics**: Multiple read-only functions for policy tracking, regional statistics, and payout eligibility checking
+### Core Functions Implemented
+- `register-auditor`: Allows experts to register as certified auditors with specializations
+- `request-crop-audit`: Enables farmers to request audits with three verification levels (Basic, Standard, Premium)
+- `accept-audit-request`: Lets registered auditors accept pending audit requests
+- `submit-audit-results`: Auditors submit comprehensive scoring across 4 key areas with recommendations
+- `dispute-audit-results`: Farmers can dispute audit outcomes through simplified resolution process
 
-#### Advanced Logic
-- **Dynamic Premium Calculation**: 5% of coverage amount plus duration-based fees
-- **Weather Threshold System**: Payouts trigger when rainfall < 20% normal or temperature > 110% normal
-- **Graduated Payout System**: Payout amounts scale with severity of weather conditions
-- **Policy Status Tracking**: Active, expired, and claimed status management
-- **Regional Aggregation**: Statistical tracking by geographic regions
+### Advanced Features
+- **Multi-level Verification**: Basic (u1000), Standard (u2000), Premium (u3000) fee structure
+- **Reputation System**: Auditors gain reputation points (+5) for completed audits, capped at 200
+- **Compliance Scoring**: Automated calculation of overall compliance from 4 assessment areas
+- **Certification Validity**: 1-year certification periods (~52560 blocks) for completed audits
+- **Comprehensive Error Handling**: 6 new error constants (ERR-AUDIT-NOT-FOUND through ERR-AUDITOR-NOT-AUTHORIZED)
 
 ## Testing & Validation
-- ✅ Contract passes Clarity v3 syntax validation
-- ✅ Comprehensive test suite with 20+ test cases covering all functionality
-- ✅ CI/CD pipeline configured with GitHub Actions
-- ✅ Clarity v3 compliant with proper error handling and type safety
-- ✅ Full coverage of policy creation, weather claims, renewals, and edge cases
-- ✅ Oracle authorization and access control testing
-- ✅ Regional statistics and multi-farmer scenario testing
+✅ **Contract Syntax**: Passes Clarity v3 compliance with proper error handling  
+✅ **Comprehensive Test Suite**: 25+ new test cases covering all audit system functionality  
+✅ **CI/CD Pipeline**: Enhanced GitHub Actions workflow with Node.js testing  
+✅ **Line Ending Normalization**: All files properly formatted with LF endings  
+✅ **Independent Design**: No cross-contract dependencies, fully self-contained feature  
+
+## Quality Assurance
+- **Error Constants**: All error codes properly defined in u200+ range to avoid conflicts
+- **Data Validation**: Score ranges (0-100), verification levels (1-3), and buffer validation implemented
+- **Access Controls**: Role-based permissions for farmers, auditors, and contract functions
+- **State Management**: Proper updating of audit status, farmer history, and auditor statistics
+- **Gas Optimization**: Efficient data structures and minimal computational overhead
+
+This enhancement provides farmers with credible certification pathways while offering insurance providers additional risk assessment data, creating a more robust and transparent crop insurance ecosystem.

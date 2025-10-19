@@ -1,8 +1,8 @@
 name: CI
-on: [push]
+on: [push, pull_request]
 jobs:
   tests:
-    name: "Smart-Crop-Insurance"
+    name: "Smart Crop Insurance Tests"
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout code"
@@ -11,3 +11,11 @@ jobs:
         uses: docker://hirosystems/clarinet:latest
         with:
           args: check
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: "Install dependencies"
+        run: npm install
+      - name: "Run tests"
+        run: npm test
