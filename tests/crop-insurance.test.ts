@@ -333,4 +333,342 @@ describe("Smart Crop Insurance Contract", () => {
       expect(response.result).toBeErr(101); // ERR-POLICY-NOT-FOUND
     });
   });
+
+  describe("Risk Assessment Management", () => {
+    describe("Risk Assessment Updates", () => {
+      it("should allow contract owner to update risk assessment", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["midwest", "corn", 2, 15, 85, 365], // Medium risk, 15 claims, 85% success rate, 1 year period
+          deployer
+        );
+        expect(response.result).toBeOk(true);
+      });
+
+      it("should prevent non-owner from updating risk assessment", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["midwest", "corn", 2, 15, 85, 365],
+          farmer1
+        );
+        expect(response.result).toBeErr(100); // ERR-NOT-AUTHORIZED
+      });
+
+      it("should validate risk level bounds", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["midwest", "corn", 5, 15, 85, 365], // Invalid risk level > 4
+          deployer
+        );
+        expect(response.result).toBeErr(110); // ERR-INVALID-RISK-LEVEL
+      });
+
+      it("should validate success rate bounds", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["midwest", "corn", 2, 15, 150, 365], // Invalid success rate > 100
+          deployer
+        );
+        expect(response.result).toBeErr(110); // ERR-INVALID-RISK-LEVEL
+      });
+
+      it("should store risk assessment data correctly", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["plains", "wheat", 3, 25, 75, 180],
+          deployer
+        );
+        
+        const assessment = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-risk-assessment",
+          ["plains", "wheat"],
+          deployer
+        );
+        expect(assessment.result).toBeSome({
+          "risk-level": 3,
+          "historical-claims": 25,
+          "success-rate": 75,
+          "last-updated": simnet.blockHeight,
+          "assessment-period": 180
+        });
+      });
+    });
+
+    describe("Risk Factors Management", () => {
+      it("should allow contract owner to update risk factors", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["southeast", 75, 60, 85, 90], // Weather volatility 75%, climate trend 60%, soil quality 85%, water availability 90%
+          deployer
+        );
+        expect(response.result).toBeOk(true);
+      });
+
+      it("should prevent non-owner from updating risk factors", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["southeast", 75, 60, 85, 90],
+          farmer1
+        );
+        expect(response.result).toBeErr(100); // ERR-NOT-AUTHORIZED
+      });
+
+      it("should validate risk factor bounds", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["southeast", 150, 60, 85, 90], // Invalid weather volatility > 100
+          deployer
+        );
+        expect(response.result).toBeErr(110); // ERR-INVALID-RISK-LEVEL
+      });
+
+      it("should store risk factors correctly", () => {
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["north", 40, 25, 95, 80],
+          deployer
+        );
+        
+        const factors = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-risk-factors",
+          ["north"],
+          deployer
+        );
+        expect(factors.result).toBeSome({
+          "weather-volatility": 40,
+          "climate-trend": 25,
+          "soil-quality": 95,
+          "water-availability": 80,
+          "last-assessment": simnet.blockHeight
+        });
+      });
+    });
+
+    describe("Risk-Adjusted Premium Calculation", () => {
+      beforeEach(() => {
+        // Set up risk assessment for corn in midwest
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["midwest", "corn", 2, 10, 90, 365], // Medium risk
+          deployer
+        );
+        
+        // Set up risk factors for midwest
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["midwest", 30, 20, 80, 85],
+          deployer
+        );
+      });
+
+      it("should calculate risk-adjusted premium with medium risk", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "calculate-risk-adjusted-premium",
+          [100000, 1000, "midwest", "corn"],
+          deployer
+        );
+        // Base premium would be 5001, with medium risk (100%) and factor adjustments
+        expect(response.result).toBeOk();
+        expect(Number(response.result.replace("(ok ", "").replace(")", ""))).toBeGreaterThan(5000);
+      });
+
+      it("should return base premium when no risk data exists", () => {
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "calculate-risk-adjusted-premium",
+          [50000, 500, "unknown", "unknown"],
+          deployer
+        );
+        expect(response.result).toBeOk(3000); // Base premium calculation
+      });
+
+      it("should apply low risk discount", () => {
+        // Set up low risk assessment
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["safe-region", "corn", 1, 5, 95, 365], // Low risk
+          deployer
+        );
+        
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "calculate-risk-adjusted-premium",
+          [100000, 1000, "safe-region", "corn"],
+          deployer
+        );
+        
+        // Should be less than base premium due to low risk multiplier (80%)
+        expect(response.result).toBeOk();
+        const premium = Number(response.result.replace("(ok ", "").replace(")", ""));
+        expect(premium).toBeLessThan(5001); // Base premium is 5001
+      });
+
+      it("should apply high risk premium", () => {
+        // Set up high risk assessment
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["risky-region", "corn", 4, 40, 60, 365], // Extreme risk
+          deployer
+        );
+        
+        const response = simnet.callPublicFn(
+          "crop-insurance",
+          "calculate-risk-adjusted-premium",
+          [100000, 1000, "risky-region", "corn"],
+          deployer
+        );
+        
+        // Should be more than base premium due to extreme risk multiplier (160%)
+        expect(response.result).toBeOk();
+        const premium = Number(response.result.replace("(ok ", "").replace(")", ""));
+        expect(premium).toBeGreaterThan(5001); // Base premium is 5001
+      });
+    });
+
+    describe("Risk Profile Analysis", () => {
+      beforeEach(() => {
+        // Create comprehensive test data
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["test-region", "soybeans", 3, 20, 80, 365],
+          deployer
+        );
+        
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-factors",
+          ["test-region", 50, 40, 70, 85],
+          deployer
+        );
+        
+        // Create some policies to generate regional stats
+        simnet.callPublicFn(
+          "crop-insurance",
+          "create-policy",
+          ["soybeans", 75000, 1200, "test-region"],
+          farmer1
+        );
+        
+        simnet.callPublicFn(
+          "crop-insurance",
+          "create-policy",
+          ["soybeans", 60000, 1000, "test-region"],
+          farmer2
+        );
+      });
+
+      it("should return comprehensive risk profile", () => {
+        const profile = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-risk-profile",
+          ["test-region", "soybeans"],
+          deployer
+        );
+        
+        expect(profile.result).toHaveProperty("assessment");
+        expect(profile.result).toHaveProperty("factors");
+        expect(profile.result).toHaveProperty("regional-stats");
+        expect(profile.result).toHaveProperty("risk-score");
+        
+        // Verify assessment data
+        expect(profile.result.assessment).toBeSome({
+          "risk-level": 3,
+          "historical-claims": 20,
+          "success-rate": 80,
+          "last-updated": simnet.blockHeight,
+          "assessment-period": 365
+        });
+        
+        // Verify risk score is within valid range
+        const riskScore = profile.result["risk-score"];
+        expect(riskScore).toBeGreaterThanOrEqual(0);
+        expect(riskScore).toBeLessThanOrEqual(100);
+      });
+
+      it("should calculate risk score for region without assessment data", () => {
+        const profile = simnet.callReadOnlyFn(
+          "crop-insurance",
+          "get-risk-profile",
+          ["unknown-region", "unknown-crop"],
+          deployer
+        );
+        
+        expect(profile.result["risk-score"]).toBeGreaterThanOrEqual(0);
+        expect(profile.result["risk-score"]).toBeLessThanOrEqual(100);
+      });
+    });
+
+    describe("Integration with Existing Features", () => {
+      it("should work alongside existing policy creation", () => {
+        // Set up risk data
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["integrated-region", "wheat", 2, 12, 88, 365],
+          deployer
+        );
+        
+        // Create policy - should still work with existing flow
+        const policyResponse = simnet.callPublicFn(
+          "crop-insurance",
+          "create-policy",
+          ["wheat", 80000, 1500, "integrated-region"],
+          farmer1
+        );
+        expect(policyResponse.result).toBeOk(1);
+        
+        // Check risk-adjusted premium calculation
+        const premiumResponse = simnet.callPublicFn(
+          "crop-insurance",
+          "calculate-risk-adjusted-premium",
+          [80000, 1500, "integrated-region", "wheat"],
+          deployer
+        );
+        expect(premiumResponse.result).toBeOk();
+      });
+
+      it("should not interfere with weather claims processing", () => {
+        // Set up policy and risk data
+        simnet.callPublicFn(
+          "crop-insurance",
+          "update-risk-assessment",
+          ["weather-region", "corn", 1, 8, 92, 365],
+          deployer
+        );
+        
+        simnet.callPublicFn(
+          "crop-insurance",
+          "create-policy",
+          ["corn", 90000, 1200, "weather-region"],
+          farmer1
+        );
+        
+        // Weather claims should still work normally
+        const claimResponse = simnet.callPublicFn(
+          "crop-insurance",
+          "submit-weather-claim",
+          [1, 15, 95],
+          oracle
+        );
+        expect(claimResponse.result).toBeOk();
+      });
+    });
+  });
 });

@@ -1,36 +1,39 @@
-# Smart Crop Insurance Contract
+# Policy Risk Assessment and Premium Adjustment System
 
 ## Overview
-Comprehensive decentralized crop insurance system that provides automated weather-based payouts to farmers. This smart contract enables farmers to purchase insurance policies for their crops and receive automatic compensation when weather conditions fall outside normal parameters, reducing risk and providing financial security.
+Enhanced the Smart Crop Insurance contract with a comprehensive risk assessment system that enables dynamic premium calculations based on regional risk factors, historical data, and environmental conditions. This feature provides more accurate pricing by incorporating real-world risk indicators while maintaining the existing contract functionality.
 
 ## Technical Implementation
-### Key Functions and Data Structures Added
 
-#### Core Data Structures
-- **Policy Management**: Complete policy lifecycle with farmer details, coverage amounts, premium calculations, and regional tracking
-- **Weather Claims Processing**: Oracle-driven weather data submission with automated payout calculations
-- **Regional Statistics**: Comprehensive tracking of policies, claims, and payouts by geographic region
-- **Multi-Account Support**: Full support for multiple farmers, policies, and oracle management
+### New Data Structures
+- **risk-assessments**: Maps region-crop combinations to risk levels (1-4), historical claims, success rates, and assessment periods
+- **risk-factors**: Tracks regional environmental factors including weather volatility, climate trends, soil quality, and water availability  
+- **Risk level constants**: LOW (1), MEDIUM (2), HIGH (3), EXTREME (4) with corresponding premium multipliers (80%, 100%, 130%, 160%)
 
-#### Smart Contract Features
-- **Policy Creation**: `create-policy` - Farmers can purchase crop insurance with customizable coverage, duration, and crop types
-- **Weather-Based Claims**: `submit-weather-claim` - Oracle-submitted weather data triggers automatic payouts based on rainfall and temperature thresholds
-- **Policy Renewal**: `renew-policy` - Existing policies can be extended with additional premium payments
-- **Oracle Management**: `set-oracle` - Contract owner can designate trusted weather data providers
-- **Comprehensive Analytics**: Multiple read-only functions for policy tracking, regional statistics, and payout eligibility checking
+### Key Functions Added
+- `update-risk-assessment`: Owner-only function to set risk data for region/crop combinations
+- `update-risk-factors`: Owner-only function to update environmental risk factors by region
+- `calculate-risk-adjusted-premium`: Public function for dynamic premium calculation with risk factors
+- `get-risk-assessment`, `get-risk-factors`, `get-risk-profile`: Read-only functions for risk data retrieval
 
-#### Advanced Logic
-- **Dynamic Premium Calculation**: 5% of coverage amount plus duration-based fees
-- **Weather Threshold System**: Payouts trigger when rainfall < 20% normal or temperature > 110% normal
-- **Graduated Payout System**: Payout amounts scale with severity of weather conditions
-- **Policy Status Tracking**: Active, expired, and claimed status management
-- **Regional Aggregation**: Statistical tracking by geographic regions
+### Premium Calculation Algorithm  
+1. **Base Premium**: Standard 5% of coverage + duration factor
+2. **Risk Level Multiplier**: 80% (low) to 160% (extreme risk)
+3. **Environmental Adjustments**: Weather volatility (+50% max), climate trends (+30% max), soil quality discount (-20% max), water availability discount (-25% max)
+4. **Composite Risk Score**: 0-100 scale combining all factors with historical performance data
 
 ## Testing & Validation
-- ✅ Contract passes Clarity v3 syntax validation
-- ✅ Comprehensive test suite with 20+ test cases covering all functionality
+- ✅ Contract passes clarinet check (syntax validation)
+- ✅ Comprehensive test suite with 25+ new test cases covering all risk assessment functions
+- ✅ Integration tests verify compatibility with existing policy and claims workflows
+- ✅ Error handling validation for authorization, input bounds, and edge cases
 - ✅ CI/CD pipeline configured with GitHub Actions
-- ✅ Clarity v3 compliant with proper error handling and type safety
-- ✅ Full coverage of policy creation, weather claims, renewals, and edge cases
-- ✅ Oracle authorization and access control testing
-- ✅ Regional statistics and multi-farmer scenario testing
+- ✅ Clarity v3 compliant with proper error constants and data type safety
+
+## Value Proposition
+- **Actuarial Accuracy**: Premiums now reflect real risk through data-driven assessment
+- **Regional Adaptability**: Different pricing for varying geographic and environmental conditions
+- **Historical Learning**: System improves over time by incorporating claims history
+- **Operational Flexibility**: Risk parameters can be updated as conditions change
+- **Farmer Benefits**: Lower premiums for low-risk regions and crops
+- **Insurer Protection**: Higher premiums for high-risk scenarios ensure sustainability

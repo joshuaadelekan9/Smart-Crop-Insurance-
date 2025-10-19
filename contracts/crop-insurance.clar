@@ -13,6 +13,8 @@
 (define-constant ERR-INVALID-WEATHER-DATA (err u106))
 (define-constant ERR-CLAIM-ALREADY-PROCESSED (err u107))
 (define-constant ERR-INSUFFICIENT-FUNDS (err u108))
+(define-constant ERR-RISK-ASSESSMENT-NOT-FOUND (err u109))
+(define-constant ERR-INVALID-RISK-LEVEL (err u110))
 
 ;; Contract owner
 (define-constant CONTRACT-OWNER tx-sender)
@@ -25,6 +27,18 @@
 ;; Weather threshold constants (in percentage)
 (define-constant RAINFALL-THRESHOLD u20) ;; 20% below normal triggers payout
 (define-constant TEMPERATURE-THRESHOLD u110) ;; 110% above normal triggers payout
+
+;; Risk assessment constants
+(define-constant RISK-LOW u1)
+(define-constant RISK-MEDIUM u2)
+(define-constant RISK-HIGH u3)
+(define-constant RISK-EXTREME u4)
+
+;; Premium multipliers for risk levels (in basis points - 10000 = 100%)
+(define-constant RISK-MULTIPLIER-LOW u8000)    ;; 80% of base premium
+(define-constant RISK-MULTIPLIER-MEDIUM u10000) ;; 100% of base premium
+(define-constant RISK-MULTIPLIER-HIGH u13000)   ;; 130% of base premium
+(define-constant RISK-MULTIPLIER-EXTREME u16000) ;; 160% of base premium
 
 ;; Data variables
 (define-data-var next-policy-id uint u1)
@@ -72,6 +86,30 @@
         total-coverage: uint,
         total-claims: uint,
         total-payouts: uint
+    }
+)
+
+;; Risk assessment data for regions and crop types
+(define-map risk-assessments
+    { region: (string-ascii 100), crop-type: (string-ascii 50) }
+    {
+        risk-level: uint,
+        historical-claims: uint,
+        success-rate: uint,
+        last-updated: uint,
+        assessment-period: uint
+    }
+)
+
+;; Risk factor tracking for dynamic adjustments
+(define-map risk-factors
+    { region: (string-ascii 100) }
+    {
+        weather-volatility: uint,
+        climate-trend: uint,
+        soil-quality: uint,
+        water-availability: uint,
+        last-assessment: uint
     }
 )
 
@@ -265,6 +303,199 @@
 (define-private (calculate-premium (coverage uint) (duration uint))
     ;; Simple premium calculation: 5% of coverage + duration factor
     (+ (/ (* coverage u5) u100) (/ duration u1000))
+)
+
+;; Public function to update risk assessment for a region and crop type
+(define-public (update-risk-assessment
+    (region (string-ascii 100))
+    (crop-type (string-ascii 50))
+    (risk-level uint)
+    (historical-claims uint)
+    (success-rate uint)
+    (assessment-period uint)
+)
+    (begin
+        ;; Only contract owner can update risk assessments
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        
+        ;; Validate risk level
+        (asserts! (and (>= risk-level RISK-LOW) (<= risk-level RISK-EXTREME)) ERR-INVALID-RISK-LEVEL)
+        
+        ;; Validate success rate (0-100%)
+        (asserts! (<= success-rate u100) ERR-INVALID-RISK-LEVEL)
+        
+        ;; Update risk assessment
+        (map-set risk-assessments
+            { region: region, crop-type: crop-type }
+            {
+                risk-level: risk-level,
+                historical-claims: historical-claims,
+                success-rate: success-rate,
+                last-updated: block-height,
+                assessment-period: assessment-period
+            }
+        )
+        
+        (ok true)
+    )
+)
+
+;; Public function to update regional risk factors
+(define-public (update-risk-factors
+    (region (string-ascii 100))
+    (weather-volatility uint)
+    (climate-trend uint)
+    (soil-quality uint)
+    (water-availability uint)
+)
+    (begin
+        ;; Only contract owner can update risk factors
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        
+        ;; Validate risk factors (0-100 scale)
+        (asserts! (and 
+            (<= weather-volatility u100)
+            (<= climate-trend u100)
+            (<= soil-quality u100)
+            (<= water-availability u100)
+        ) ERR-INVALID-RISK-LEVEL)
+        
+        ;; Update risk factors
+        (map-set risk-factors
+            { region: region }
+            {
+                weather-volatility: weather-volatility,
+                climate-trend: climate-trend,
+                soil-quality: soil-quality,
+                water-availability: water-availability,
+                last-assessment: block-height
+            }
+        )
+        
+        (ok true)
+    )
+)
+
+;; Public function to calculate risk-adjusted premium
+(define-public (calculate-risk-adjusted-premium
+    (coverage uint)
+    (duration uint)
+    (region (string-ascii 100))
+    (crop-type (string-ascii 50))
+)
+    (let (
+        (base-premium (calculate-premium coverage duration))
+        (risk-data (map-get? risk-assessments { region: region, crop-type: crop-type }))
+        (regional-factors (map-get? risk-factors { region: region }))
+    )
+        (match risk-data
+            risk-assessment
+            (let (
+                (risk-multiplier (get-risk-multiplier (get risk-level risk-assessment)))
+                (adjusted-premium (/ (* base-premium risk-multiplier) u10000))
+                (factor-adjustment (match regional-factors
+                    factors (calculate-factor-adjustment factors)
+                    u10000 ;; No adjustment if no factors found
+                ))
+                (final-premium (/ (* adjusted-premium factor-adjustment) u10000))
+            )
+                (ok final-premium)
+            )
+            (ok base-premium) ;; Return base premium if no risk data found
+        )
+    )
+)
+
+;; Read-only function to get risk assessment
+(define-read-only (get-risk-assessment (region (string-ascii 100)) (crop-type (string-ascii 50)))
+    (map-get? risk-assessments { region: region, crop-type: crop-type })
+)
+
+;; Read-only function to get regional risk factors
+(define-read-only (get-risk-factors (region (string-ascii 100)))
+    (map-get? risk-factors { region: region })
+)
+
+;; Read-only function to get comprehensive risk profile
+(define-read-only (get-risk-profile (region (string-ascii 100)) (crop-type (string-ascii 50)))
+    (let (
+        (assessment (map-get? risk-assessments { region: region, crop-type: crop-type }))
+        (factors (map-get? risk-factors { region: region }))
+        (regional-stats (get-regional-stats region))
+    )
+        {
+            assessment: assessment,
+            factors: factors,
+            regional-stats: regional-stats,
+            risk-score: (calculate-composite-risk-score assessment factors regional-stats)
+        }
+    )
+)
+
+;; Private function to get risk multiplier based on risk level
+(define-private (get-risk-multiplier (risk-level uint))
+    (if (is-eq risk-level RISK-LOW)
+        RISK-MULTIPLIER-LOW
+        (if (is-eq risk-level RISK-MEDIUM)
+            RISK-MULTIPLIER-MEDIUM
+            (if (is-eq risk-level RISK-HIGH)
+                RISK-MULTIPLIER-HIGH
+                RISK-MULTIPLIER-EXTREME
+            )
+        )
+    )
+)
+
+;; Private function to calculate factor-based adjustment
+(define-private (calculate-factor-adjustment (factors { weather-volatility: uint, climate-trend: uint, soil-quality: uint, water-availability: uint, last-assessment: uint }))
+    (let (
+        (weather-factor (/ (* (get weather-volatility factors) u50) u100)) ;; Max 50% increase
+        (climate-factor (/ (* (get climate-trend factors) u30) u100))     ;; Max 30% increase
+        (soil-factor (- u10000 (/ (* (get soil-quality factors) u20) u100))) ;; Up to 20% discount for good soil
+        (water-factor (- u10000 (/ (* (get water-availability factors) u25) u100))) ;; Up to 25% discount for good water
+        (total-adjustment (+ u10000 weather-factor climate-factor (- soil-factor u10000) (- water-factor u10000)))
+    )
+        ;; Cap adjustment between 70% and 180%
+        (if (< total-adjustment u7000)
+            u7000
+            (if (> total-adjustment u18000)
+                u18000
+                total-adjustment
+            )
+        )
+    )
+)
+
+;; Private function to calculate composite risk score (0-100)
+(define-private (calculate-composite-risk-score 
+    (assessment (optional { risk-level: uint, historical-claims: uint, success-rate: uint, last-updated: uint, assessment-period: uint }))
+    (factors (optional { weather-volatility: uint, climate-trend: uint, soil-quality: uint, water-availability: uint, last-assessment: uint }))
+    (stats { total-policies: uint, total-coverage: uint, total-claims: uint, total-payouts: uint })
+)
+    (let (
+        (base-score (match assessment
+            data (* (get risk-level data) u20) ;; Risk level contributes 20-80 points
+            u50 ;; Default moderate risk if no data
+        ))
+        (success-adjustment (match assessment
+            data (- u50 (/ (get success-rate data) u2)) ;; Success rate reduces risk
+            u0
+        ))
+        (claims-ratio (if (> (get total-policies stats) u0)
+            (/ (* (get total-claims stats) u100) (get total-policies stats))
+            u0
+        ))
+        (historical-adjustment (/ claims-ratio u5)) ;; Historical claims increase risk
+        (factor-score (match factors
+            data (/ (+ (get weather-volatility data) (get climate-trend data) 
+                      (- u100 (get soil-quality data)) (- u100 (get water-availability data))) u4)
+            u25 ;; Default moderate environmental risk
+        ))
+        (composite (+ base-score success-adjustment historical-adjustment factor-score))
+    )
+        ;; Cap score between 0 and 100
+        (if (> composite u100) u100 (if (< composite u0) u0 composite))
+    )
 )
 
 ;; Private function to calculate payout based on weather conditions

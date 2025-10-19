@@ -2,17 +2,17 @@
 name = "simnet"
 
 [accounts.deployer]
-mnemonic = "fetch outside black test wash cover just actual execute nice door want airport betray quantum stamp fish act pen trust portion fatigue scissors vague"
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 balance = 100_000_000_000_000
 
 [accounts.wallet_1]
-mnemonic = "spoil sock coyote include verify comic jacket gain beauty tank flush victory illness edge reveal shallow juice probe stable report camera muscle kiss soul"
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
 balance = 100_000_000_000_000
 
 [accounts.wallet_2]
-mnemonic = "arrange scale orient half ugly kid bike twin magnet joke hurt fiber ethics super receive version wreck media fluid much abstract reward street genre"
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
 balance = 100_000_000_000_000
 
 [accounts.wallet_3]
-mnemonic = "glide old normal adapt lazy please adult enhance social effort practice rural fiber guide bacon nation weasel detail wet gravity describe project wedding winner"
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
 balance = 100_000_000_000_000
