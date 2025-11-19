@@ -678,3 +678,409 @@
     ;; Simplified: return all audit IDs (in real implementation would check validity dates)
     audit-ids
 )
+
+;; ============================================================================
+;; PREMIUM AUTO-SUSPENSION & REINSTATEMENT SYSTEM
+;; ============================================================================
+
+;; Error constants for suspension system
+(define-constant ERR-POLICY-SUSPENDED (err u400))
+(define-constant ERR-POLICY-NOT-SUSPENDED (err u401))
+(define-constant ERR-GRACE-PERIOD-ACTIVE (err u402))
+(define-constant ERR-INSUFFICIENT-REINSTATEMENT-PREMIUM (err u403))
+(define-constant ERR-SUSPENSION-ALREADY-PROCESSED (err u404))
+(define-constant ERR-SUSPENSION-NOT-FOUND (err u405))
+
+;; Suspension status constants
+(define-constant SUSPENSION-GRACE-PERIOD u1)
+(define-constant SUSPENSION-ACTIVE u2)
+(define-constant SUSPENSION-LIFTED u3)
+
+;; Data variables for suspension system
+(define-data-var grace-period-blocks uint u17520)
+(define-data-var total-suspended-policies uint u0)
+(define-data-var suspension-fee-rate uint u500)
+
+;; Policy suspension history mapping
+(define-map policy-suspensions
+    { policy-id: uint }
+    {
+        farmer: principal,
+        suspension-block: uint,
+        grace-period-end-block: uint,
+        suspension-status: uint,
+        reinstatement-cost: uint,
+        suspended-until-block: (optional uint)
+    }
+)
+
+;; Policy suspension tracking per farmer
+(define-map farmer-suspended-policies
+    { farmer: principal }
+    { suspended-policy-ids: (list 50 uint) }
+)
+
+;; Public function to trigger premium suspension on expired policy
+(define-public (suspend-expired-policy (policy-id uint))
+    (let (
+        (policy (unwrap! (map-get? policies { policy-id: policy-id }) ERR-POLICY-NOT-FOUND))
+        (grace-period-end (+ block-height (var-get grace-period-blocks)))
+        (reinstatement-premium (calculate-reinstatement-premium (get coverage-amount policy)))
+        (farmer-address (get farmer policy))
+    )
+        (asserts! (is-none (map-get? policy-suspensions { policy-id: policy-id })) ERR-SUSPENSION-ALREADY-PROCESSED)
+        (asserts! (>= block-height (get end-block policy)) ERR-POLICY-NOT-ACTIVE)
+        
+        (map-set policy-suspensions
+            { policy-id: policy-id }
+            {
+                farmer: farmer-address,
+                suspension-block: block-height,
+                grace-period-end-block: grace-period-end,
+                suspension-status: SUSPENSION-GRACE-PERIOD,
+                reinstatement-cost: reinstatement-premium,
+                suspended-until-block: none
+            }
+        )
+        
+        (update-farmer-suspended-policies farmer-address policy-id)
+        (var-set total-suspended-policies (+ (var-get total-suspended-policies) u1))
+        
+        (ok policy-id)
+    )
+)
+
+;; Public function to enforce suspension if grace period expired
+(define-public (enforce-suspension (policy-id uint))
+    (let (
+        (suspension (unwrap! (map-get? policy-suspensions { policy-id: policy-id }) ERR-SUSPENSION-NOT-FOUND))
+        (grace-end (get grace-period-end-block suspension))
+        (enforcement-block (+ grace-end u1))
+        (suspension-duration u52560)
+        (actual-suspension-end (+ block-height suspension-duration))
+    )
+        (asserts! (>= block-height grace-end) ERR-GRACE-PERIOD-ACTIVE)
+        (asserts! (is-eq (get suspension-status suspension) SUSPENSION-GRACE-PERIOD) ERR-SUSPENSION-ALREADY-PROCESSED)
+        
+        (map-set policy-suspensions
+            { policy-id: policy-id }
+            (merge suspension {
+                suspension-status: SUSPENSION-ACTIVE,
+                suspended-until-block: (some actual-suspension-end)
+            })
+        )
+        
+        (ok true)
+    )
+)
+
+;; Public function to reinstate suspended policy with additional premium
+(define-public (reinstate-suspended-policy (policy-id uint))
+    (let (
+        (policy (unwrap! (map-get? policies { policy-id: policy-id }) ERR-POLICY-NOT-FOUND))
+        (suspension (unwrap! (map-get? policy-suspensions { policy-id: policy-id }) ERR-SUSPENSION-NOT-FOUND))
+        (reinstatement-cost (get reinstatement-cost suspension))
+        (new-duration u52560)
+        (farmer-address (get farmer policy))
+    )
+        (asserts! (is-eq tx-sender farmer-address) ERR-NOT-AUTHORIZED)
+        (asserts! (or (is-eq (get suspension-status suspension) SUSPENSION-GRACE-PERIOD) (is-eq (get suspension-status suspension) SUSPENSION-ACTIVE)) ERR-SUSPENSION-ALREADY-PROCESSED)
+        (asserts! (>= reinstatement-cost u1) ERR-INSUFFICIENT-REINSTATEMENT-PREMIUM)
+        
+        (map-set policy-suspensions
+            { policy-id: policy-id }
+            (merge suspension { suspension-status: SUSPENSION-LIFTED })
+        )
+        
+        (map-set policies
+            { policy-id: policy-id }
+            (merge policy {
+                end-block: (+ block-height new-duration),
+                premium-paid: (+ (get premium-paid policy) reinstatement-cost),
+                status: POLICY-ACTIVE
+            })
+        )
+        
+        (var-set total-premium-pool (+ (var-get total-premium-pool) reinstatement-cost))
+        
+        (ok true)
+    )
+)
+
+;; Read-only function to get suspension details
+(define-read-only (get-policy-suspension (policy-id uint))
+    (map-get? policy-suspensions { policy-id: policy-id })
+)
+
+;; Read-only function to get farmer's suspended policies
+(define-read-only (get-farmer-suspended-policies (farmer principal))
+    (default-to { suspended-policy-ids: (list) } (map-get? farmer-suspended-policies { farmer: farmer }))
+)
+
+;; Read-only function to get suspension system statistics
+(define-read-only (get-suspension-system-stats)
+    {
+        grace-period-blocks: (var-get grace-period-blocks),
+        total-suspended-policies: (var-get total-suspended-policies),
+        suspension-fee-rate: (var-get suspension-fee-rate)
+    }
+)
+
+;; Private function to calculate reinstatement premium
+(define-private (calculate-reinstatement-premium (coverage uint))
+    (/ (* coverage u3) u100)
+)
+
+;; Private function to update farmer suspended policies list
+(define-private (update-farmer-suspended-policies (farmer principal) (policy-id uint))
+    (let (
+        (current-suspensions (default-to { suspended-policy-ids: (list) } (map-get? farmer-suspended-policies { farmer: farmer })))
+        (updated-list (unwrap! (as-max-len? (append (get suspended-policy-ids current-suspensions) policy-id) u50) false))
+    )
+        (map-set farmer-suspended-policies
+            { farmer: farmer }
+            { suspended-policy-ids: updated-list }
+        )
+        true
+    )
+)
+
+;; ============================================================================
+;; DISPUTE RESOLUTION & ARBITRATION SYSTEM
+;; ============================================================================
+
+;; Error constants for dispute system
+(define-constant ERR-DISPUTE-NOT-FOUND (err u300))
+(define-constant ERR-DISPUTE-ALREADY-EXISTS (err u301))
+(define-constant ERR-INSUFFICIENT-DISPUTE-STAKE (err u302))
+(define-constant ERR-DISPUTE-NOT-PENDING (err u303))
+(define-constant ERR-ARBITRATOR-NOT-QUALIFIED (err u304))
+(define-constant ERR-DISPUTE-ALREADY-RESOLVED (err u305))
+(define-constant ERR-INVALID-RESOLUTION-VOTE (err u306))
+(define-constant ERR-APPEAL-NOT-ELIGIBLE (err u307))
+(define-constant ERR-NOT-DISPUTE-PARTY (err u308))
+
+;; Dispute status constants
+(define-constant DISPUTE-PENDING u1)
+(define-constant DISPUTE-IN-REVIEW u2)
+(define-constant DISPUTE-RESOLVED u3)
+(define-constant DISPUTE-APPEALED u4)
+
+;; Resolution outcome constants
+(define-constant OUTCOME-CLAIMANT-WINS u1)
+(define-constant OUTCOME-RESPONDENT-WINS u2)
+(define-constant OUTCOME-SETTLEMENT u3)
+
+;; Data variables for dispute system
+(define-data-var next-dispute-id uint u1)
+(define-data-var total-arbitration-stake uint u0)
+(define-data-var minimum-arbitrator-reputation uint u150)
+(define-data-var dispute-stake-amount uint u5000)
+
+;; Active disputes mapping
+(define-map disputes
+    { dispute-id: uint }
+    {
+        claimant: principal,
+        respondent: principal,
+        dispute-type: uint,
+        related-id: uint,
+        stake-amount: uint,
+        description: (string-ascii 300),
+        status: uint,
+        creation-block: uint,
+        resolution-block: (optional uint),
+        arbitrator: (optional principal),
+        resolution-outcome: (optional uint),
+        claimant-appeal-allowed: bool
+    }
+)
+
+;; Arbitration decisions mapping
+(define-map arbitration-decisions
+    { dispute-id: uint }
+    {
+        arbitrator: principal,
+        decision-block: uint,
+        outcome: uint,
+        reasoning-hash: (buff 32),
+        votes-for-claimant: uint,
+        votes-for-respondent: uint
+    }
+)
+
+;; Arbitrator voting records
+(define-map arbitrator-votes
+    { dispute-id: uint, arbitrator: principal }
+    {
+        vote: uint,
+        vote-block: uint,
+        stake-locked: uint
+    }
+)
+
+;; Dispute history per user
+(define-map user-dispute-history
+    { user: principal }
+    { dispute-ids: (list 50 uint) }
+)
+
+;; Public function to initiate a dispute
+(define-public (create-dispute
+    (respondent principal)
+    (dispute-type uint)
+    (related-id uint)
+    (description (string-ascii 300))
+)
+    (let (
+        (dispute-id (var-get next-dispute-id))
+        (stake (var-get dispute-stake-amount))
+    )
+        (asserts! (> stake u0) ERR-INSUFFICIENT-DISPUTE-STAKE)
+        (asserts! (is-none (map-get? disputes { dispute-id: dispute-id })) ERR-DISPUTE-ALREADY-EXISTS)
+        
+        (map-set disputes
+            { dispute-id: dispute-id }
+            {
+                claimant: tx-sender,
+                respondent: respondent,
+                dispute-type: dispute-type,
+                related-id: related-id,
+                stake-amount: stake,
+                description: description,
+                status: DISPUTE-PENDING,
+                creation-block: block-height,
+                resolution-block: none,
+                arbitrator: none,
+                resolution-outcome: none,
+                claimant-appeal-allowed: true
+            }
+        )
+        
+        (update-user-dispute-history tx-sender dispute-id)
+        (update-user-dispute-history respondent dispute-id)
+        (var-set next-dispute-id (+ dispute-id u1))
+        (var-set total-arbitration-stake (+ (var-get total-arbitration-stake) stake))
+        
+        (ok dispute-id)
+    )
+)
+
+;; Public function for qualified arbitrator to accept dispute
+(define-public (accept-dispute-review (dispute-id uint))
+    (let (
+        (dispute (unwrap! (map-get? disputes { dispute-id: dispute-id }) ERR-DISPUTE-NOT-FOUND))
+        (arbitrator-info (unwrap! (map-get? registered-auditors { auditor: tx-sender }) ERR-ARBITRATOR-NOT-QUALIFIED))
+    )
+        (asserts! (>= (get reputation-score arbitrator-info) (var-get minimum-arbitrator-reputation)) ERR-ARBITRATOR-NOT-QUALIFIED)
+        (asserts! (is-eq (get status dispute) DISPUTE-PENDING) ERR-DISPUTE-NOT-PENDING)
+        (asserts! (is-none (map-get? disputes { dispute-id: dispute-id })) false)
+        
+        (map-set disputes
+            { dispute-id: dispute-id }
+            (merge dispute {
+                status: DISPUTE-IN-REVIEW,
+                arbitrator: (some tx-sender)
+            })
+        )
+        
+        (ok true)
+    )
+)
+
+;; Public function for arbitrator to submit resolution
+(define-public (submit-dispute-resolution
+    (dispute-id uint)
+    (outcome uint)
+    (reasoning-hash (buff 32))
+)
+    (let (
+        (dispute (unwrap! (map-get? disputes { dispute-id: dispute-id }) ERR-DISPUTE-NOT-FOUND))
+    )
+        (asserts! (is-eq (get status dispute) DISPUTE-IN-REVIEW) ERR-DISPUTE-NOT-PENDING)
+        (asserts! (is-eq (some tx-sender) (get arbitrator dispute)) ERR-ARBITRATOR-NOT-QUALIFIED)
+        (asserts! (and (>= outcome u1) (<= outcome u3)) ERR-INVALID-RESOLUTION-VOTE)
+        
+        (map-set arbitration-decisions
+            { dispute-id: dispute-id }
+            {
+                arbitrator: tx-sender,
+                decision-block: block-height,
+                outcome: outcome,
+                reasoning-hash: reasoning-hash,
+                votes-for-claimant: u0,
+                votes-for-respondent: u0
+            }
+        )
+        
+        (map-set disputes
+            { dispute-id: dispute-id }
+            (merge dispute {
+                status: DISPUTE-RESOLVED,
+                resolution-block: (some block-height),
+                resolution-outcome: (some outcome)
+            })
+        )
+        
+        (ok true)
+    )
+)
+
+;; Public function to appeal a resolution
+(define-public (appeal-dispute-resolution (dispute-id uint))
+    (let (
+        (dispute (unwrap! (map-get? disputes { dispute-id: dispute-id }) ERR-DISPUTE-NOT-FOUND))
+    )
+        (asserts! (and (is-eq tx-sender (get claimant dispute)) (get claimant-appeal-allowed dispute)) ERR-APPEAL-NOT-ELIGIBLE)
+        (asserts! (is-eq (get status dispute) DISPUTE-RESOLVED) ERR-DISPUTE-NOT-PENDING)
+        
+        (map-set disputes
+            { dispute-id: dispute-id }
+            (merge dispute {
+                status: DISPUTE-APPEALED,
+                claimant-appeal-allowed: false
+            })
+        )
+        
+        (ok true)
+    )
+)
+
+;; Read-only function to get dispute details
+(define-read-only (get-dispute (dispute-id uint))
+    (map-get? disputes { dispute-id: dispute-id })
+)
+
+;; Read-only function to get arbitration decision
+(define-read-only (get-arbitration-decision (dispute-id uint))
+    (map-get? arbitration-decisions { dispute-id: dispute-id })
+)
+
+;; Read-only function to get user's dispute history
+(define-read-only (get-user-disputes (user principal))
+    (default-to { dispute-ids: (list) } (map-get? user-dispute-history { user: user }))
+)
+
+;; Read-only function to get dispute system statistics
+(define-read-only (get-dispute-system-stats)
+    {
+        next-dispute-id: (var-get next-dispute-id),
+        total-arbitration-stake: (var-get total-arbitration-stake),
+        minimum-arbitrator-reputation: (var-get minimum-arbitrator-reputation),
+        dispute-stake-amount: (var-get dispute-stake-amount)
+    }
+)
+
+;; Private function to update user dispute history
+(define-private (update-user-dispute-history (user principal) (dispute-id uint))
+    (let (
+        (current-history (default-to { dispute-ids: (list) } (map-get? user-dispute-history { user: user })))
+        (updated-list (unwrap! (as-max-len? (append (get dispute-ids current-history) dispute-id) u50) false))
+    )
+        (map-set user-dispute-history
+            { user: user }
+            { dispute-ids: updated-list }
+        )
+        true
+    )
+)
