@@ -1,0 +1,31 @@
+[network]
+name = "devnet"
+stacks_node_rpc_address = "http://localhost:20443"
+deployment_fee_rate = 10
+
+[accounts.deployer]
+mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+balance = 100_000_000_000_000
+
+[accounts.wallet_1]
+mnemonic = "sell invite acquire kitten bamboo drastic junk kaufen extend scheme oven benefit"
+balance = 100_000_000_000_000
+
+[accounts.wallet_2] 
+mnemonic = "hold reduce baby proud journey praise dawn broom basket oven strategy layer"
+balance = 100_000_000_000_000
+
+[accounts.wallet_3]
+mnemonic = "board list obtain sugar park layer orient endless world nuclear bright silver"
+balance = 100_000_000_000_000
+
+[devnet]
+orchestrator_port = 20000
+bitcoin_node_p2p_port = 18444
+bitcoin_node_rpc_port = 18443
+stacks_node_p2p_port = 20444
+stacks_node_rpc_port = 20443
+stacks_api_port = 3999
+stacks_api_events_port = 3700
+bitcoin_controller_port = 18442
+bitcoin_controller_block_time = 30_000
